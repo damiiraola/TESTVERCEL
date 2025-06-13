@@ -221,6 +221,11 @@
                 <h2 class="text-lg font-semibold text-slate-700">Estado Actual</h2>
                 <div id="tracking-status-badge" class="mt-2 text-xl font-bold p-3 rounded-lg text-center"></div>
             </div>
+             <!-- NEW: Client Message Container -->
+            <div id="tracking-client-message-container" class="mt-6 hidden">
+                <h3 class="font-semibold text-slate-700">Mensaje del Taller:</h3>
+                <p id="tracking-client-message" class="mt-2 p-4 bg-blue-50 border border-blue-200 rounded-lg text-slate-800 whitespace-pre-wrap"></p>
+            </div>
             <div class="mt-6 space-y-4">
                 <div>
                     <h3 class="font-semibold text-slate-600">Artículo:</h3>
@@ -751,6 +756,7 @@
             document.getElementById('image-preview').innerHTML = '';
             document.getElementById('generate-description-from-image-btn').disabled = true;
             document.getElementById('client-message-container').classList.add('hidden');
+            document.getElementById('client-message-output').value = ''; // Clear previous message
             clearUIErrors();
 
             const isEditing = !!dbId;
@@ -767,6 +773,8 @@
                         if (input) input.value = envelope[key];
                     });
                     document.getElementById('envelope-db-id').value = envelope.id;
+                    document.getElementById('client-message-output').value = envelope.clientMessage || '';
+
                     if (envelope.imageDataUrls && Array.isArray(envelope.imageDataUrls)) {
                         existingEnvelopeImageUrls = [...envelope.imageDataUrls];
                         renderImagePreviews(existingEnvelopeImageUrls);
@@ -807,6 +815,7 @@
                     status: document.getElementById('status').value,
                     budget: parseFloat(document.getElementById('budget').value) || 0,
                     internalNotes: document.getElementById('internal-notes').value,
+                    clientMessage: document.getElementById('client-message-output').value, // Save client message
                     lastUpdated: new Date().toISOString()
                 };
                 
@@ -943,6 +952,16 @@
                 document.getElementById('tracking-item').textContent = envelope.itemDescription;
                 document.getElementById('tracking-work').textContent = envelope.workDescription;
                 
+                // Show client message on tracking page
+                const clientMessageContainer = document.getElementById('tracking-client-message-container');
+                const clientMessageEl = document.getElementById('tracking-client-message');
+                if (envelope.clientMessage && envelope.clientMessage.trim() !== '') {
+                    clientMessageEl.textContent = envelope.clientMessage;
+                    clientMessageContainer.classList.remove('hidden');
+                } else {
+                    clientMessageContainer.classList.add('hidden');
+                }
+
                 if(auth.currentUser && envelope.ownerUid === auth.currentUser.uid){
                     const url = `${window.location.origin}${window.location.pathname}#track/${envelope.envelopeId}`;
                     document.getElementById('customer-share-link-input').value = url;
@@ -988,9 +1007,14 @@
 
             try {
                 const publicData = {
-                    envelopeId: envelope.envelopeId, clientName: envelope.clientName,
-                    itemDescription: envelope.itemDescription, workDescription: envelope.workDescription,
-                    status: envelope.status, lastUpdated: new Date().toISOString(), ownerUid: userId 
+                    envelopeId: envelope.envelopeId,
+                    clientName: envelope.clientName,
+                    itemDescription: envelope.itemDescription,
+                    workDescription: envelope.workDescription,
+                    status: envelope.status,
+                    clientMessage: envelope.clientMessage || "", // Add client message to public data
+                    lastUpdated: new Date().toISOString(),
+                    ownerUid: userId 
                 };
                 await setDoc(doc(db, `/artifacts/${appId}/public/data/envelopes`, envelope.envelopeId), publicData, { merge: true });
                 window.location.hash = `track/${envelope.envelopeId}`;
@@ -1009,19 +1033,23 @@
             loader.classList.remove('hidden');
             loader.querySelector('p').textContent = "Consultando IA...";
 
-            const apiKey = ""; // Provided by environment
+            // IMPORTANTE: En un entorno de producción como Vercel, la API Key
+            // NO debe estar aquí. Debe manejarse a través de una "Serverless Function"
+            // que oculte la clave. Para pruebas, la clave vacía "" puede funcionar
+            // en entornos que la inyectan automáticamente. Si falla en Vercel, es por esta razón.
+            const apiKey = ""; 
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             const parts = [{ text: prompt }];
             if (image) parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
             
             try {
                 const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts }] }) });
-                if (!response.ok) throw new Error(`API Error: ${response.status}`);
+                if (!response.ok) throw new Error(`API Error: ${response.statusText} (${response.status})`);
                 const result = await response.json();
                 return result.candidates?.[0]?.content?.parts?.[0]?.text || "No se pudo obtener una respuesta.";
             } catch (error) {
                 console.error("Gemini API Error:", error);
-                showUIError(loginErrorMessage, `Error de IA: ${error.message}`);
+                showUIError(loginErrorMessage, `Error de IA: ${error.message}. Asegúrese de que la clave de API sea válida y esté configurada correctamente en el entorno del servidor.`);
                 return null;
             } finally {
                 if (buttonToDisable) buttonToDisable.disabled = false;
